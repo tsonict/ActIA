@@ -19,7 +19,7 @@ RUN apt-get -y update && apt-get install -y --fix-missing \
     curl \
     graphicsmagick \
     libgraphicsmagick1-dev \
-    libatlas-base-dev \
+    libopenblas-dev \
     libavcodec-dev \
     libavformat-dev \
     libgtk2.0-dev \
@@ -33,21 +33,15 @@ RUN apt-get -y update && apt-get install -y --fix-missing \
     zip \
     && apt-get clean && rm -rf /tmp/* /var/tmp/*
 
-# Virtual Environment
-ENV VIRTUAL_ENV=/opt/venv
-RUN python3 -m venv $VIRTUAL_ENV
-ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
-# Install Dlib
-ENV CFLAGS=-static
-RUN pip3 install --upgrade pip && \
-    git clone -b 'v19.24' --single-branch https://github.com/davisking/dlib.git && \
-    cd dlib/ && \
-    python3 setup.py install --set BUILD_SHARED_LIBS=OFF
 
-# Install production dependencies.
-RUN pip install --no-cache-dir --upgrade pip
-RUN pip install --no-cache-dir -r requirements.txt
+# Clone, build, and install Dlib as a shared library
+RUN git clone https://github.com/davisking/dlib.git \
+    && mkdir dlib/dlib/build \
+    && cd dlib/dlib/build \
+    && cmake -DBUILD_SHARED_LIBS=ON .. \
+    && make \
+    && make install
 
 #Runtime Image
 FROM python:3.11-slim-buster
@@ -82,7 +76,9 @@ COPY --from=compile \
 # Add our packages
 ENV PATH="/opt/venv/bin:$PATH"
 
-
+# Install production dependencies.
+RUN pip install --no-cache-dir --upgrade pip
+RUN pip install --no-cache-dir -r requirements.txt
 # Run the web service on container startup. Here we use the gunicorn
 # webserver, with one worker process and 8 threads.
 # For environments with multiple CPU cores, increase the number of workers
