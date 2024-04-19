@@ -27,7 +27,7 @@ API_BIO = os.getenv("API_BIO")
 # Configuración de la carpeta de carga
 UPLOAD_FOLDER = 'uploads'
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-
+db_pool = None
 
 
 def connect_with_connector() -> sqlalchemy.engine.base.Engine:
@@ -109,6 +109,8 @@ def migrate_db(db_pool: sqlalchemy.engine.base.Engine) -> None:
 
         conn.commit()
 
+init_db()
+
 def insert_Actor(query) -> Response:
     # Intentar conectar a la base de datos
     try:
@@ -122,9 +124,6 @@ def insert_Actor(query) -> Response:
             "application logs for more details.")
     
     return Response(status=200, response="Actor Agregado")
-
-
-
 
 
 def get_ActorData(query):
@@ -144,11 +143,11 @@ def get_ActorData(query):
         return result
 
     except Exception as e:
-        return jsonify({'error': 'Ocurrio un problema, intentalo de nuevo'})
+        return jsonify({'error': 'Something wrong happend, try again'}), 500
 
 
 
-def buscar_info(full_name):
+def search_info(full_name):
     try:
         url = f"https://api.themoviedb.org/3/search/person?query={full_name}&include_adult=false&language=en-US&page=1"
         headers = {
@@ -163,7 +162,7 @@ def buscar_info(full_name):
             actor_id = result.get('id')
 
             if actor_id:
-                bio_info = buscar_bio(actor_id)
+                bio_info = search_bio(actor_id)
                 if bio_info:
                     combined_info = {**result, **bio_info}
                     return combined_info
@@ -176,7 +175,7 @@ def buscar_info(full_name):
         
     return {}
 
-def buscar_bio(id):
+def search_bio(id):
     try:
         url = f"https://api.themoviedb.org/3/person/{id}?api_key={API_BIO}&language=en-US"
         response = requests.get(url)
@@ -197,18 +196,18 @@ def actor_info(results):
         return []
     actor_info_list = []
     for res in results:
-        actor_info = buscar_info(res)
+        actor_info = search_info(res)
         if actor_info: 
             actor_info_list.append(actor_info)
     return actor_info_list
 
 def find_face(unknown_face_encodings):
-            # Resultados del reconocimiento
+
     results = []
     threshold = 0.6
     matches = []
     for unknown_face_encoding in unknown_face_encodings:
-        # Comparar rostro desconocido con los conocidos en la DB
+        # Compare 128D face array of unknown person within threshold 
         query = "SELECT name FROM public.vectors WHERE sqrt(power(CUBE(array[{}]) <-> vec_low, 2) + power(CUBE(array[{}]) <-> vec_high, 2)) <= {} ".format(
                 ','.join(str(s) for s in unknown_face_encoding[0:64]),
                 ','.join(str(s) for s in unknown_face_encoding[64:128]),
@@ -222,7 +221,7 @@ def find_face(unknown_face_encodings):
         if tmp != 'None':
             matches.append(tmp)
             print("Matches: ", matches)
-                # Si encontramos una coincidencia, usar el nombre asociado al rostro conocido
+                # Avoid same names
             for match in matches:
                 if match not in results:
                     results.append(str(match))
@@ -234,7 +233,7 @@ def find_face(unknown_face_encodings):
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-def corregir_orientacion(image_data):
+def correct_image_rotation(image_data):
     try:
         # Abrir la imagen utilizando PIL
         image = Image.open(image_data)
@@ -262,7 +261,7 @@ def corregir_orientacion(image_data):
         return corrected_image_data
 
     except Exception as e:
-        return jsonify({'error': 'Error al procesar el video'}), 500
+        return jsonify({'error': 'Error while processing video'}), 500
 
 
 def process_frame(frame, results):
@@ -295,7 +294,7 @@ def process_video_frames(video_path):
         return results
  
     except Exception as e:
-        return jsonify({'error': 'Error al procesar el video'}), 500
+        return jsonify({'error': 'Error processing video'}), 500
 
 
 
@@ -303,14 +302,14 @@ def process_video_frames(video_path):
 @app.route('/add_known_face', methods=['POST'])
 def add_known_face():
     if 'file' not in request.files:
-        return jsonify({'error': 'No se proporcionó ninguna imagen'}), 400
+        return jsonify({'error': 'No file was attached'}), 400
 
     file = request.files['file']
     name = request.form.get('name')
 
     # Asegúrate de que la imagen tenga una extensión válida
     if not file.filename.lower().endswith(('.png', '.jpg', '.jpeg')):
-        return jsonify({'error': 'Formato de imagen no admitido'}), 400
+        return jsonify({'error': 'Wrong image format'}), 400
 
     # Leer la imagen y convertirla a un formato adecuado para face_recognition
     image = face_recognition.load_image_file(file)
@@ -327,7 +326,7 @@ def add_known_face():
 
 
 # Ruta para detectar y reconocer caras en una imagen
-@app.route('/detect_and_recognize_faces', methods=['POST'])
+@app.route('/photo_recognition', methods=['POST'])
 def detect_and_recognize_faces():
     try:
         if 'file' not in request.files:
@@ -340,7 +339,7 @@ def detect_and_recognize_faces():
         try:
             image_data = BytesIO(file.read())
             # Corregir la orientación de la imagen
-            corrected_image_data = corregir_orientacion(image_data)
+            corrected_image_data = correct_image_rotation(image_data)
 
             if corrected_image_data != None:
                 # Detección y reconocimiento de caras
@@ -349,37 +348,35 @@ def detect_and_recognize_faces():
                 unknown_face_encodings = face_recognition.face_encodings(unknown_image, unknown_face_locations)
             else:
                 # Manejar el caso en que no se pudo corregir la orientación
-                return jsonify({'error': 'Error al corregir la orientación de la imagen'}), 400
+                return jsonify({'error': 'Error while verifying image rotation'}), 400
             
         except Exception as e:
-            return jsonify({'error': {str(e)}}), 400  # Bad Request
+            return jsonify({'error': {str(e)}}), 400 
 
         results = find_face(unknown_face_encodings)
-        print("len res: ", len(results))
-        print("Results:", results)
         res_info = actor_info(results)
-        print("res_info: ", res_info)
+
         return res_info
     except Exception as e:
-        return jsonify({'error': 'Error al procesar la imagen, intentelo de nuevo'}), 500
+        return jsonify({'error': 'Error while processing image, try again'}), 500
 
     
-@app.route('/reconocimiento_video', methods=['POST'])
+@app.route('/video_recognition', methods=['POST'])
 def detect_and_recognize_faces_in_video():
     try:
         if 'file' not in request.files:
-            return jsonify({'error': 'No se proporcionó ningún video'}), 400
+            return jsonify({'error': 'No file was attached'}), 400
 
         file = request.files['file']
 
         if file.filename == '':
-            return jsonify({'error': 'Nombre de archivo vacío'}), 400
+            return jsonify({'error': 'Not valid filename'}), 400
 
         if not file.filename.lower().endswith(('.mp4', '.avi', '.gif')):
-            return jsonify({'error': 'Formato de imagen no admitido'}), 400
+            return jsonify({'error': 'Wrong video format'}), 400
 
         if file and allowed_file(file.filename):
-            # Extensión válida de video
+            # Valid video extension
             filename = secure_filename(file.filename)
 
             # Verificar y crear el directorio si no existe
@@ -388,11 +385,11 @@ def detect_and_recognize_faces_in_video():
 
             filepath = os.path.join(upload_folder, filename)
             file.save(filepath)
-            # Verificar si el archivo existe después de guardarlo
+            # Verify if the file exists
             if not os.path.exists(filepath):
-                return jsonify({'error': 'Error al guardar el archivo'}), 500
+                return jsonify({'error': 'Error saving file'}), 500
 
-            # Procesar fotogramas del video
+            # Process video frames
             results = process_video_frames(filepath)
 
             os.remove(filepath)
@@ -400,15 +397,14 @@ def detect_and_recognize_faces_in_video():
             return actor_info(results)
         
     except Exception as e:
-        return jsonify({'error': 'Error al procesar el video, intentelo de nuevo'}), 500
+        return jsonify({'error': 'Error while processing video, try again'}), 500
 
 
-    return jsonify({'error': 'Formato de video no admitido'}), 400
+    return jsonify({'error': 'Wrong video format'}), 400
 
 
 if __name__ == '__main__':
-    init_db()
-    app.run(host='127.0.0.1', port=8080, debug=False)
+    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 8080)), debug=True)
     
 
     

@@ -1,0 +1,7 @@
+.pytest_cache
+DOCKERFILE
+README.md
+*.pyo
+*.pyd
+*.pyc
+__pycache__
