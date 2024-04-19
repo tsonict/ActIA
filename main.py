@@ -88,6 +88,7 @@ def connect_with_connector() -> sqlalchemy.engine.base.Engine:
 
 def init_db () -> sqlalchemy.engine.base.Engine:
     global db_pool
+    
     if db_pool is None:
         db_pool = connect_with_connector()
         migrate_db(db_pool)
@@ -97,12 +98,13 @@ def migrate_db(db_pool: sqlalchemy.engine.base.Engine) -> None:
     with db_pool.connect() as conn:
         tmp = conn.execute(sqlalchemy.text("SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'cube');")).fetchone()
         extension_exists = tmp[0]
+
         if not extension_exists:
             conn.execute(sqlalchemy.text("CREATE EXTENSION cube;"))
 
-
         tmp = conn.execute(sqlalchemy.text("SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name = 'vectors');")).fetchone()
         table_exists = tmp[0]
+
         if not table_exists:
             conn.execute(sqlalchemy.text("CREATE TABLE vectors (id serial, name varchar(50), vec_low cube, vec_high cube, UNIQUE(name));"))
             conn.execute(sqlalchemy.text("CREATE INDEX vectors_vec_idx ON vectors (vec_low, vec_high);"))
@@ -127,19 +129,15 @@ def insert_Actor(query) -> Response:
 
 
 def get_ActorData(query):
-    # Intentar conectar a la base de datos
     try:
-
         with db_pool.connect() as conn:
             tmp = conn.execute(sqlalchemy.text(str(query))).fetchone()
-
             if tmp != None:
                 result = tmp[0]
-
             else:
                 result = None
-
             conn.commit()
+
         return result
 
     except Exception as e:
@@ -225,7 +223,6 @@ def find_face(unknown_face_encodings):
             for match in matches:
                 if match not in results:
                     results.append(str(match))
-        #Evaluar si no se encuentra el actor
 
 
     return results
@@ -235,10 +232,10 @@ def allowed_file(filename):
 
 def correct_image_rotation(image_data):
     try:
-        # Abrir la imagen utilizando PIL
+        # Open the image with PILLOW
         image = Image.open(image_data)
 
-        # Corregir la orientación
+        # Correct image
         if hasattr(image, '_getexif'):
             exif = image._getexif()
             if exif is not None:
@@ -253,7 +250,7 @@ def correct_image_rotation(image_data):
 
         image = image.convert('RGB')
 
-        # Guardar la imagen en BytesIO para enviarla a face_recognition
+        # Save image in bytes
         corrected_image_data = BytesIO()
         image.save(corrected_image_data, format='JPEG')
         corrected_image_data.seek(0)
@@ -307,15 +304,15 @@ def add_known_face():
     file = request.files['file']
     name = request.form.get('name')
 
-    # Asegúrate de que la imagen tenga una extensión válida
+    # Verify image format
     if not file.filename.lower().endswith(('.png', '.jpg', '.jpeg')):
         return jsonify({'error': 'Wrong image format'}), 400
 
-    # Leer la imagen y convertirla a un formato adecuado para face_recognition
+    # Load image
     image = face_recognition.load_image_file(file)
     face_encoding = face_recognition.face_encodings(image)[0]
 
-    # Almacenar el rostro conocido con su nombre asociado
+    # Save the face encoding to the db
     if len(face_encoding) > 0:
         query = "INSERT INTO vectors (name, vec_low, vec_high) VALUES ('{}', CUBE(array[{}]), CUBE(array[{}])) RETURNING id".format(name,
                 ','.join(str(s) for s in face_encoding[0:64]),
@@ -331,29 +328,29 @@ def detect_and_recognize_faces():
     try:
         if 'file' not in request.files:
             return jsonify({'error': 'No se proporcionó ninguna imagen'}), 400
-        # Obtener datos del formulario multipart
+        # Obtain request file
         file = request.files['file']
         if not file.filename.lower().endswith(('.png', '.jpg', '.jpeg')):
             return jsonify({'error': 'Formato de imagen no admitido'}), 400
-        # Verificar si se puede abrir la imagen correctamente
+        # Open file
         try:
             image_data = BytesIO(file.read())
-            # Corregir la orientación de la imagen
+            # Correct file if uploaded with rn_imagepicker
             corrected_image_data = correct_image_rotation(image_data)
 
             if corrected_image_data != None:
-                # Detección y reconocimiento de caras
+                # Detect and recognize faces in the image
                 unknown_image = face_recognition.load_image_file(corrected_image_data)
                 unknown_face_locations = face_recognition.face_locations(unknown_image)
                 unknown_face_encodings = face_recognition.face_encodings(unknown_image, unknown_face_locations)
             else:
-                # Manejar el caso en que no se pudo corregir la orientación
                 return jsonify({'error': 'Error while verifying image rotation'}), 400
             
         except Exception as e:
             return jsonify({'error': {str(e)}}), 400 
 
         results = find_face(unknown_face_encodings)
+        #Get actor info from tmdb
         res_info = actor_info(results)
 
         return res_info
@@ -379,7 +376,7 @@ def detect_and_recognize_faces_in_video():
             # Valid video extension
             filename = secure_filename(file.filename)
 
-            # Verificar y crear el directorio si no existe
+            # Create upload folder if not exists
             upload_folder = app.config['UPLOAD_FOLDER']
             os.makedirs(upload_folder, exist_ok=True)
 
