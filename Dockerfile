@@ -27,13 +27,14 @@ RUN apt-get -y update && apt-get install -y --fix-missing \
     liblapack-dev \
     libswscale-dev \
     pkg-config \
-    python3-dev \
-    python3-numpy \
     software-properties-common \
     zip \
     && apt-get clean && rm -rf /tmp/* /var/tmp/*
 
-
+# Virtual Environment
+ENV VIRTUAL_ENV=/opt/venv
+RUN python3 -m venv $VIRTUAL_ENV
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 # Clone, build, and install Dlib as a shared library
 RUN git clone https://github.com/davisking/dlib.git \
