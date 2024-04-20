@@ -22,8 +22,8 @@ app = Flask(__name__)
 logger = logging.getLogger()
 
 ALLOWED_EXTENSIONS = {'mp4', 'avi', 'mov', 'gif'}
-API_KEY = os.getenv("API_KEY")
-API_BIO = os.getenv("API_BIO")
+API_KEY = os.environ["API_KEY"]
+API_BIO = os.environ["API_BIO"]
 # Configuración de la carpeta de carga
 UPLOAD_FOLDER = 'uploads'
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
