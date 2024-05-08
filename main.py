@@ -283,7 +283,7 @@ def process_video_frames(video_path):
         total_frames = int(capturar_frames.get(cv2.CAP_PROP_FRAME_COUNT))
 
         results = []
-        for fno in range(0, total_frames, int(total_frames * 0.15)):
+        for fno in range(0, total_frames, int(total_frames * 0.10)):
             capturar_frames.set(cv2.CAP_PROP_POS_FRAMES, fno)
             _, image = capturar_frames.read()
             results = process_frame(image, results)
